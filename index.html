@@ -276,10 +276,10 @@ html{scroll-behavior:smooth}
               <label class="toggleSwitch"><input id="setTypingSfx" type="checkbox" checked><span class="toggleKnob"></span></label>
             </div>
             <div class="settingRow">
-              <div class="settingInfo"><b>Custom Music URL</b><span>Paste a direct MP3 link or local mp3 file/path.</span></div>
+              <div class="settingInfo"><b>Custom Music URL</b><span>Paste a direct MP3 link to replace the default music.</span></div>
             </div>
             <div class="settingsStack">
-              <input class="settingsInput" id="musicUrlInput" placeholder="Example: Music1.mp3 or ./mp3/Music1.mp3">
+              <input class="settingsInput" id="musicUrlInput" placeholder="Paste direct MP3 URL here">
               <button class="settingBtn" id="applyMusicUrl">Set Custom Music</button>
             </div>
             <div class="musicSearchBox">
@@ -856,117 +856,57 @@ function applyTheme(t,animate=true,clickedBtn=null){
 }
 document.querySelectorAll('.themeBtn').forEach(b=>b.onclick=()=>applyTheme(b.dataset.theme,true,b));applyTheme(localStorage.getItem(STORAGE_KEYS.theme)||localStorage.getItem(STORAGE_KEYS.legacyTheme)||'dark',false);
 const music=document.getElementById('music'),playBtn=document.getElementById('playBtn'),muteBtn=document.getElementById('muteBtn'),bgVideo=document.getElementById('bgVideo');
-
-/* === AUDIO / VIDEO FIX PACK ===
-   - No more autoplay-block alert spam.
-   - Default folder music works with ./mp3/Music1.mp3 and ./mp4/Music1.mp4.
-   - Custom music/background accepts a full URL OR local file/path like Music1.mp3, mp3/Music1.mp3, ./mp3/Music1.mp3.
-   - Next button always restores folder playlist when custom music is off.
-*/
-function isFullUrl(value){return /^(https?:|blob:|data:)/i.test(String(value||''));}
-function cleanPath(value){return String(value||'').trim().replace(/^['"]|['"]$/g,'').replace(/\\/g,'/');}
-function localAssetPath(value,folder,ext){
-  let v=cleanPath(value);
-  if(!v)return '';
-  if(isFullUrl(v))return v;
-  v=v.replace(/^\.\//,'').replace(/^\//,'');
-  if(!v.toLowerCase().endsWith(ext.toLowerCase())) v+=ext;
-  if(!v.includes('/')) v=`${folder}/${v}`;
-  return './'+v.replace(/^\.\//,'');
-}
-function setSource(media,path){
-  if(!media||!path)return;
-  const source=media.querySelector('source');
-  const current=source?source.getAttribute('src'):media.getAttribute('src');
-  if(current===path)return;
-  if(source) source.src=path; else media.src=path;
-  try{media.load()}catch(e){}
-}
 function currentTrack(){return MUSIC_TRACKS[((state.trackIndex%MUSIC_TRACKS.length)+MUSIC_TRACKS.length)%MUSIC_TRACKS.length]}
-function updateTrackButton(){
-  if(!playBtn||!music)return;
-  const trackInfo=state.usingCustomMusic?'Custom Music':currentTrack().name;
-  playBtn.textContent=`${music.paused?'♫ Start Music':'♫ Pause Music'} • ${trackInfo}`;
-}
+function updateTrackButton(){const trackInfo=state.usingCustomMusic?"Custom Music":currentTrack().name;playBtn.textContent=`${music.paused?'♫ Start Music':'♫ Pause Music'} • ${trackInfo}`}
 function setTrack(index,{autoplay=false,resetTime=true}={}){
-  state.usingCustomMusic=false;
+  if(state.usingCustomMusic)return;
   state.trackIndex=((index%MUSIC_TRACKS.length)+MUSIC_TRACKS.length)%MUSIC_TRACKS.length;
   localStorage.setItem(STORAGE_KEYS.track,String(state.trackIndex));
   const trackInfo=currentTrack();
-  setSource(music,trackInfo.mp3);
-  if(!appSettings?.bgVideoUrl) setSource(bgVideo,trackInfo.mp4);
-  if(resetTime){try{music.currentTime=0}catch(e){} try{bgVideo.currentTime=0}catch(e){}}
+  const audioSource=music.querySelector('source');
+  const videoSource=bgVideo.querySelector('source');
+  if(audioSource)audioSource.src=trackInfo.mp3;
+  if(videoSource)videoSource.src=trackInfo.mp4;
+  music.load();
+  bgVideo.load();
+  if(resetTime){try{music.currentTime=0;bgVideo.currentTime=0}catch(e){}}
   updateTrackButton();
-  if(autoplay) startMusic(false);
+  if(autoplay){keepVideoPlaying();music.play().then(()=>{updateTrackButton();syncBgVideoToMusic()}).catch(()=>{})}
 }
-function nextTrack(autoplay=true){
-  if(appSettings){appSettings.musicUrl=''; saveSettings?.();}
-  setTrack(state.trackIndex+1,{autoplay,resetTime:true});
+function nextTrack(autoplay=true){setTrack(state.trackIndex+1,{autoplay,resetTime:true})}
+function safeVideoTime(){
+  return (bgVideo && isFinite(bgVideo.currentTime)) ? bgVideo.currentTime : 0;
 }
-function safeVideoTime(){return (bgVideo && isFinite(bgVideo.currentTime)) ? bgVideo.currentTime : 0;}
 function syncMusicToBgVideo(){
-  if(!bgVideo || !music || state.usingCustomMusic || !isFinite(safeVideoTime())) return;
+  if(!bgVideo || !music || !isFinite(safeVideoTime())) return;
   const dur=isFinite(music.duration) && music.duration>0 ? music.duration : null;
   const target=dur ? safeVideoTime()%dur : safeVideoTime();
   if(Math.abs(music.currentTime-target)>.22){try{music.currentTime=target}catch(e){}}
 }
 function syncBgVideoToMusic(){
-  if(!bgVideo || !music || state.usingCustomMusic || !isFinite(music.currentTime) || !bgVideo.duration) return;
+  if(!bgVideo || !music || !isFinite(music.currentTime) || !bgVideo.duration) return;
   const target=music.currentTime % bgVideo.duration;
   if(Math.abs(bgVideo.currentTime-target)>.32){try{bgVideo.currentTime=target}catch(e){}}
 }
-function keepVideoPlaying(){if(bgVideo && bgVideo.paused) bgVideo.play().catch(()=>{});}
-function startMusic(showBlockedMessage=true){
-  if(!music)return Promise.resolve(false);
-  keepVideoPlaying();
-  return music.play().then(()=>{
-    updateTrackButton();
-    if(!music.muted) syncBgVideoToMusic();
-    return true;
-  }).catch(()=>{
-    updateTrackButton();
-    if(showBlockedMessage){
-      const old=playBtn.textContent;
-      playBtn.textContent='♫ Click Start Music Again';
-      setTimeout(()=>updateTrackButton(),1400);
-    }
-    return false;
-  });
-}
-function applyCustomMusic(value,{autoplay=false}={}){
-  const path=localAssetPath(value,'mp3','.mp3');
-  if(!path)return false;
-  state.usingCustomMusic=true;
-  setSource(music,path);
-  try{music.currentTime=0}catch(e){}
-  updateTrackButton();
-  if(autoplay) startMusic(false);
-  return true;
-}
-function applyCustomBackground(value){
-  const path=localAssetPath(value,'mp4','.mp4');
-  if(!path)return false;
-  setSource(bgVideo,path);
-  try{bgVideo.currentTime=0}catch(e){}
-  keepVideoPlaying();
-  return true;
+function keepVideoPlaying(){
+  if(bgVideo && bgVideo.paused) bgVideo.play().catch(()=>{});
 }
 setInterval(()=>{
-  if(!music.paused){keepVideoPlaying(); if(!music.muted) syncBgVideoToMusic();}
+  if(!music.paused){
+    keepVideoPlaying();
+    if(!music.muted) syncBgVideoToMusic();
+  }
 },1600);
 music.addEventListener('ended',()=>{if(state.usingCustomMusic){music.currentTime=0;music.play().catch(()=>{});return}nextTrack(true)});
-bgVideo.addEventListener('ended',()=>{bgVideo.currentTime=0;bgVideo.play().catch(()=>{});});
-music.addEventListener('error',()=>{
-  updateTrackButton();
-  if(playBtn) playBtn.textContent='♫ Music file not found — check mp3 folder/name';
-});
-bgVideo.addEventListener('error',()=>{
-  console.warn('Background video file not found. Check mp4 folder/name.');
-});
+bgVideo.addEventListener('ended',()=>{if(state.usingCustomMusic){bgVideo.currentTime=0;bgVideo.play().catch(()=>{});return}syncBgVideoToMusic()});
 playBtn.onclick=()=>{
   if(music.paused){
     syncMusicToBgVideo();
-    startMusic(true);
+    music.play().then(()=>{
+      bgVideo.play().catch(()=>{});
+      updateTrackButton();
+      if(!music.muted) syncBgVideoToMusic();
+    }).catch(()=>alert('Click the intro screen or allow audio, then press Start Music.'))
   }else{
     music.pause();
     bgVideo.pause();
@@ -976,17 +916,15 @@ playBtn.onclick=()=>{
 elements.nextBtn.onclick=()=>{nextTrack(!music.paused)};
 muteBtn.onclick=()=>{
   music.muted=!music.muted;
-  muteBtn.textContent=music.muted?'Unmute':'Mute';
-  if(!music.muted) syncMusicToBgVideo();
+  if(music.muted){
+    muteBtn.textContent='Unmute';
+  }else{
+    // If music was paused, keep it paused; just line the audio up for the next play.
+    syncMusicToBgVideo();
+    muteBtn.textContent='Mute';
+  }
 };
-let txt='ILLEGAL FACTION SPINS',idx=0,title=document.getElementById('typeTitle');
-let timer=setInterval(()=>{title.textContent=txt.slice(0,++idx);if(idx>=txt.length)clearInterval(timer)},135);
-document.getElementById('gate').onclick=()=>{
-  document.getElementById('gate').classList.add('hide');
-  keepVideoPlaying();
-  syncMusicToBgVideo();
-  startMusic(false);
-};
+let txt='ILLEGAL FACTION SPINS',idx=0,title=document.getElementById('typeTitle');let timer=setInterval(()=>{title.textContent=txt.slice(0,++idx);if(idx>=txt.length)clearInterval(timer)},135);document.getElementById('gate').onclick=()=>{document.getElementById('gate').classList.add('hide');try{keepVideoPlaying()}catch(e){}try{syncMusicToBgVideo()}catch(e){}if(music){music.play().then(()=>{updateTrackButton()}).catch(()=>{})}};
 
 function initReactiveDots(){
   const canvas=document.getElementById('dotCanvas');
@@ -1056,7 +994,7 @@ function applyVisualSettings(){
     if(appSettings.bgVideoUrl){
       const source=bg.querySelector("source");
       if(source && source.getAttribute("src")!==appSettings.bgVideoUrl){
-        applyCustomBackground(appSettings.bgVideoUrl);
+        source.src=appSettings.bgVideoUrl; bg.load(); bg.play().catch(()=>{});
       }
     }
   }
@@ -1085,7 +1023,12 @@ function applyVisualSettings(){
   const brand=document.querySelector(".brand img");
   if(brand && appSettings.logoUrl) brand.src=appSettings.logoUrl;
   if(appSettings.musicUrl){
-    applyCustomMusic(appSettings.musicUrl,{autoplay:false});
+    state.usingCustomMusic=true;
+    const source=document.querySelector("#music source");
+    const audio=document.getElementById("music");
+    if(source && audio && source.getAttribute("src")!==appSettings.musicUrl){
+      source.src=appSettings.musicUrl; audio.load();
+    }
   }else if(state.usingCustomMusic){
     state.usingCustomMusic=false;
     setTrack(state.trackIndex,{autoplay:false,resetTime:false});
@@ -1119,11 +1062,10 @@ function initSettingsPanel(){
   const applyMusic=byId("applyMusicUrl");
   if(applyMusic)applyMusic.onclick=()=>{
     const val=musicUrl?.value.trim()||"";
-    appSettings.musicUrl=val;
-    saveSettings();
-    applyVisualSettings();
+    if(!val){alert("Paste a direct MP3 URL first.");return}
+    appSettings.musicUrl=val;saveSettings();applyVisualSettings();
     updateTrackButton();
-    if(val) startMusic(false);
+    document.getElementById("music")?.play().catch(()=>alert("Music URL was set, but the browser blocked autoplay. Click Start Music."));
   };
   const playPause=byId("setPlayPause");
   if(playPause)playPause.onclick=()=>{
