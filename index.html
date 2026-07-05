@@ -949,14 +949,29 @@ function setTrack(index,{autoplay=false,resetTime=true}={}){
   state.trackIndex=((index%MUSIC_TRACKS.length)+MUSIC_TRACKS.length)%MUSIC_TRACKS.length;
   localStorage.setItem(STORAGE_KEYS.track,String(state.trackIndex));
   const trackInfo=currentTrack();
-  setMediaSource(music,assetCandidates(trackInfo.mp3,'audio'));
-  if(!appSettings?.bgVideoUrl) setMediaSource(bgVideo,assetCandidates(trackInfo.mp4,'video'));
+  const customBgActive = !!(window.appSettings && window.appSettings.bgVideoUrl);
+  const audioCandidates = uniq([
+    ...assetCandidates(trackInfo.mp3,'audio'),
+    ...assetCandidates('background.mp3','audio'),
+    ...assetCandidates('Background.mp3','audio'),
+    ...assetCandidates('music.mp3','audio'),
+    ...assetCandidates('Music.mp3','audio')
+  ]);
+  const videoCandidates = uniq([
+    ...assetCandidates(trackInfo.mp4,'video'),
+    ...assetCandidates('background.mp4','video'),
+    ...assetCandidates('Background.mp4','video'),
+    ...assetCandidates('video.mp4','video'),
+    ...assetCandidates('Video.mp4','video')
+  ]);
+  setMediaSource(music,audioCandidates);
+  if(!customBgActive) setMediaSource(bgVideo,videoCandidates);
   if(resetTime){try{music.currentTime=0}catch(e){} try{bgVideo.currentTime=0}catch(e){}}
   updateTrackButton();
   if(autoplay) startMusic(false);
 }
 function nextTrack(autoplay=true){
-  if(appSettings){appSettings.musicUrl=''; saveSettings?.();}
+  if(window.appSettings){window.appSettings.musicUrl=''; if(typeof saveSettings==='function') saveSettings();}
   setTrack(state.trackIndex+1,{autoplay,resetTime:true});
 }
 function safeVideoTime(){return (bgVideo && isFinite(bgVideo.currentTime)) ? bgVideo.currentTime : 0;}
@@ -1014,11 +1029,11 @@ bgVideo.addEventListener('ended',()=>{bgVideo.currentTime=0;bgVideo.play().catch
 music.addEventListener('error',()=>{
   if(tryNextCandidate(music)) return;
   updateTrackButton();
-  if(playBtn) playBtn.textContent='♫ Music not found — check folder is mp3/Mp3/MP3 and file is Music1.mp3';
+  if(playBtn) playBtn.textContent='♫ Music not found — check mp3 folder: Music1.mp3 or background.mp3';
 });
 bgVideo.addEventListener('error',()=>{
   if(tryNextCandidate(bgVideo)) return;
-  console.warn('Background video not found. Check folder is mp4/Mp4/MP4 and file is Music1.mp4.');
+  console.warn('Background video not found. Check mp4 folder: Music1.mp4 or background.mp4.');
 });
 playBtn.onclick=()=>{
   if(music.paused){
